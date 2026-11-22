@@ -17,16 +17,16 @@ use crate::{
             },
         },
         infer::{
-            ClauseCx, ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, MirSpannedError,
-            RePermissionFlags, ToDebugTree as _, UnifyCxMode,
+            ClauseCx, ClauseFuel, ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, HrtbUniverse,
+            MirSpannedError, RePermissionFlags, ToDebugTree as _, UnifyCxMode,
         },
         syntax::{
             AdtInstance, FnDef, MirBlockIdx, MirBody, MirBodyDirection, MirLocalIdx,
             MirLocationAfter, MirPlace, MirPlaceElem, MirPlaceMention, MirPlaceMentionKind,
             MirPrettyFmt, MirPrettyFmtHooks, MirRvalue, MirSourceInfo, MirStmtIdx, MirStmtKind,
             MirStraightBinOpKind, MirStraightUnOpKind, MirTerminatorKind, Re, RelationMode,
-            ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyKind, TyOrRe,
-            UniversalReVarSourceInfo,
+            ResolvedFieldIdx, SimpleTyKind, TraitParam, TraitSpec, TraverseMentions, Ty, TyKind,
+            TyOrRe, UniversalReVarSourceInfo,
         },
     },
     utils::lang::NewtypedRangeExt as _,
@@ -385,6 +385,8 @@ impl<'a, 'sess> RegionTyCheckCx<'a, 'sess> {
     }
 
     fn check_body(&mut self) {
+        let s = self.session();
+
         for block in self.body.blocks() {
             for stmt in block.stmts(MirBodyDirection::Forwards) {
                 match stmt.kind() {
@@ -431,7 +433,34 @@ impl<'a, 'sess> RegionTyCheckCx<'a, 'sess> {
                     target: _,
                     unwind: _,
                 } => {
-                    // TODO
+                    let args = args
+                        .iter()
+                        .map(|&place| self.check_place(place.place()))
+                        .intern(s);
+
+                    let ret_ty = self.check_place(*destination);
+                    let callee = self.check_place(callee.place());
+
+                    self.ccx
+                        .oblige_ty_meets_trait_instantiated(
+                            ClauseFuel::new(),
+                            HrtbUniverse::ROOT,
+                            callee,
+                            TraitSpec {
+                                def: self.ccx.lang_items().fn_once_trait().unwrap(),
+                                params: [
+                                    TraitParam::Equals(TyOrRe::Ty(TyKind::Tuple(args).intern(s))),
+                                    TraitParam::Equals(TyOrRe::Ty(ret_ty)),
+                                ]
+                                .intern(s),
+                            },
+                        )
+                        .map({
+                            let info = block.terminator().source_info;
+
+                            move |_ccx, error| MirSpannedError(info, error)
+                        })
+                        .report_loud();
                 }
             }
         }
