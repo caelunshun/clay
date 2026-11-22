@@ -1,0 +1,13 @@
+trait Foo<'b> {
+    type Out: &longer 'b;
+}
+
+fn demo<'a, T: for<'b> Foo<'b>>() -> <T as Foo<'a>>::Out {
+    loop {}
+}
+
+fn main<T: for<'b> Foo<'b>>() {
+    is_gc(demo::<'_, T>());
+}
+
+fn is_gc<T: &longer 'gc>(v: T) {}

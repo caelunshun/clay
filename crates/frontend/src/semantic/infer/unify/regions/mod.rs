@@ -332,14 +332,17 @@
 //! likely end up having to accept some level of NP-completeness, even if we do ultimately curb the
 //! most obvious ways to trigger it.
 //!
-//! ## Reduction to SAT
+//! TODO: give details about why supporting `dyn Trait` objects basically force us to support this
+//!  feature correctly.
 //!
-//! TODO: This is out of date and requires proofs
+//! ## Reduction to SAT
 //!
 //! We've shown how to reduce SAT to the region system (i.e. NP-completeness) but how might we
 //! reduce the region system to a SAT problem (i.e. demonstrating NP-hardness, specifically if we
 //! consider checking for unsoundness)? Doing this would allow us to reuse the existing hard work
 //! that has gone into implementing efficient SAT solvers.
+//!
+//! TODO: update explanation—our algorithm has changed a lot!
 //!
 //! A formula is unsound *iff* we manage to find a set of *well-formed* universals which force the
 //! LHS to be live while forcing the RHS to be dead. Both the condition of "the LHS being forced to
@@ -403,6 +406,47 @@
 //! tricky in practice: users need to mention a large number of universals in both the LHS and the
 //! RHS simultaneously and must do so with a specific structure of inference lifetimes to create the
 //! particular structure required for exponential blowup.
+//!
+//! ## Inference Permission Completion
+//!
+//! If we have the region solver directive `permit(U: &longer '?)` and `'?` is an inference variable
+//! not bound to anything, we'd expect the directive to be equivalent to `permit(U: 'gc)`. This is,
+//! indeed, necessary in order to region-check programs such as...
+//!
+//! ```text
+//! trait Foo<'b> {
+//!     type Out: &longer 'b;
+//! }
+//!
+//! fn demo<'a, T: for<'b> Foo<'b>>() -> <T as Foo<'a>>::Out {
+//!     loop {}
+//! }
+//!
+//! fn main<T: for<'b> Foo<'b>>() {
+//!     is_gc(demo::<'_, T>());
+//! }
+//!
+//! fn is_gc<T: &longer 'gc>(v: T) {}
+//! ```
+//!
+//! Unfortunately, this does not happen. This is because, in the system of region equations...
+//!
+//! ```text
+//! permit i'0 -> u'a
+//! assert u'b -> u'a
+//! ```
+//!
+//! ...the solver first makes the choice of universals `u'a = false`, `u'b = true` and chooses the
+//! existential `i'0 = false` to make the LHS existential pass. The RHS existential is forced to
+//! make the same choices, leading to a contradiction.
+//!
+//! In order to make this program region-check, we "complete" inference variables directly involved
+//! in a permission constraint by forcing them to be implied as soon as doing so is safe. We do this
+//! by computing the set of universals implied by their truthiness and implying that inference
+//! variable as soon as all those universals are simultaneously true.
+//!
+//! This operation is done in the [`graph`] portion of the solver since it doesn't affect the
+//! underlying theory of the solver.
 //!
 //! ## Organization
 //!

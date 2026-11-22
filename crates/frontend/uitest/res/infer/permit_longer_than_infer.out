@@ -1,0 +1,26 @@
+error: argument count mismatch
+   ┌─ permit_longer_than_infer.clay:10:10
+   │
+10 │     is_gc(demo::<'_, T>());
+   │          ^^^^^^^^^^^^^^^^^
+
+error: 
+- span: permit_longer_than_infer.clay:10:10-27
+  instantiated trait not implemented
+  LHS: fn @ is_gc
+  RHS: ops::FnOnce<(), ()>
+    - fn impl unsatisfied
+      resolve fn:
+        - fn instance resolution error
+          instance: fn @ is_gc
+            - item fn unsatisfied
+              early args error:
+                - binder param WF error
+                    - idx: 0
+                        - general outlives error
+                          LHS: ?(2) _
+                          RHS: 'gc
+                          Error:
+                            - cannot progress
+                              ?(2) _ could not be inferred
+
