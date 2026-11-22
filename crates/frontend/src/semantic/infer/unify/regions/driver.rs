@@ -1,7 +1,7 @@
 use crate::semantic::{
     infer::{
-        ClauseCx, RePermissionFlags, Promise, PromiseResolutionQueue, ReAndReUnifyError,
-        ReConstraintOrder, UnifyCxMode, unify::regions::graph::RegionRelationGraph,
+        ClauseCx, Promise, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder,
+        RePermissionFlags, UnifyCxMode, unify::regions::graph::RegionRelationGraph,
     },
     syntax::{InferReVar, Re, RelationMode, UniversalReVar, UniversalReVarSourceInfo},
 };
@@ -12,7 +12,6 @@ use index_vec::IndexVec;
 #[derive(Clone)]
 pub struct ReUnifyTracker<'sess> {
     universals: IndexVec<UniversalReVar, UniversalReVarSourceInfo>,
-    next_infer: InferReVar,
     relations: Option<RegionRelationGraph<'sess>>,
 }
 
@@ -20,7 +19,6 @@ impl<'sess> ReUnifyTracker<'sess> {
     pub fn new(mode: UnifyCxMode) -> Self {
         Self {
             universals: IndexVec::new(),
-            next_infer: InferReVar::from_usize(0),
             relations: match mode {
                 UnifyCxMode::RegionBlind => None,
                 UnifyCxMode::RegionAware => Some(RegionRelationGraph::default()),
@@ -44,14 +42,11 @@ impl<'sess> ReUnifyTracker<'sess> {
     }
 
     pub fn fresh_infer(&mut self) -> InferReVar {
-        if self.mode() == UnifyCxMode::RegionBlind {
-            // For better interning
+        let Some(relations) = &mut self.relations else {
             return InferReVar::ERASED;
-        }
+        };
 
-        let var = self.next_infer;
-        self.next_infer += 1;
-        var
+        relations.fresh_infer()
     }
 
     pub fn constrain(
@@ -89,14 +84,14 @@ impl<'sess> ReUnifyTracker<'sess> {
             return queue;
         };
 
-        relations.verify(&mut queue, self.universals.len(), self.next_infer.index());
+        relations.verify(&mut queue, self.universals.len());
 
         queue
     }
 
     pub fn graphviz(&self, ccx: &ClauseCx<'_>) -> String {
         if let Some(relations) = &self.relations {
-            relations.graphviz(ccx, self.universals.len(), self.next_infer.index())
+            relations.graphviz(ccx, self.universals.len())
         } else {
             "[relations unavailable]".to_string()
         }
@@ -225,6 +220,38 @@ mod tests {
         // - constrain(re_b: &longer re_2), permit(re_2: &longer re_c)
         //   => permit(re_b: &longer re_c)
         ccx.unify_re_and_re(RelationMode::LhsOntoRhs, [re_a], [re_c])
+            .report_never();
+
+        ccx.verify();
+    }
+
+    #[test]
+    fn perm_idealization() {
+        let s = Session::new();
+        let _guard = s.clone().bind();
+
+        let s = &s;
+
+        let tcx = TyCtxt {
+            session: s,
+            impl_cache: &ImplCache::default(),
+            lang_items: &LangItems::default(),
+        };
+
+        let mut ccx = ClauseCx::new(&tcx, UnifyCxMode::RegionAware);
+
+        let re_a = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'a"));
+        let re_b = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'b"));
+        let re_inf = ccx.fresh_re_infer();
+
+        ccx.permit_outlives(
+            RelationMode::LhsOntoRhs,
+            RePermissionFlags::IDEALIZE_RHS,
+            re_a,
+            re_inf,
+        );
+
+        ccx.oblige_outlives(RelationMode::LhsOntoRhs, re_a, re_b)
             .report_never();
 
         ccx.verify();

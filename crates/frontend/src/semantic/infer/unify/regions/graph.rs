@@ -33,6 +33,7 @@ pub struct RegionRelationGraph<'sess> {
     buffer: IndexVec<BufferIdx, RegionFormulaTerm>,
     relations: IndexVec<RelationIdx, Relation<'sess>>,
     permission_count: RelationIdx,
+    next_infer: InferReVar,
 }
 
 #[derive(Clone)]
@@ -72,11 +73,18 @@ impl Default for RegionRelationGraph<'_> {
             buffer: IndexVec::new(),
             relations: IndexVec::new(),
             permission_count: RelationIdx::from_usize(0),
+            next_infer: InferReVar::from_usize(0),
         }
     }
 }
 
 impl<'sess> RegionRelationGraph<'sess> {
+    pub fn fresh_infer(&mut self) -> InferReVar {
+        let var = self.next_infer;
+        self.next_infer += 1;
+        var
+    }
+
     pub fn permit(
         &mut self,
         mode: RelationMode,
@@ -155,14 +163,9 @@ impl<'sess> RegionRelationGraph<'sess> {
         ))
     }
 
-    pub fn verify(
-        &mut self,
-        queue: &mut PromiseResolutionQueue<'sess>,
-        universal_count: usize,
-        infer_count: usize,
-    ) {
+    pub fn verify(&mut self, queue: &mut PromiseResolutionQueue<'sess>, universal_count: usize) {
         // Elaborate permissions according to their `RePermissionFlags`.
-        PermissionElaborator::new(self, universal_count, infer_count).elaborate(self, queue);
+        PermissionElaborator::new(self, universal_count).elaborate(self, queue);
 
         self.relations
             .sort_by_key(|relation| relation.order.to_num());
@@ -170,7 +173,7 @@ impl<'sess> RegionRelationGraph<'sess> {
         let (permissions, constraints) = self.relations.split_at(self.permission_count);
 
         // Now, we can run our formula solver on the stream of axioms and checks.
-        let mut solver = RegionFormulaSolver::new(universal_count, infer_count);
+        let mut solver = RegionFormulaSolver::new(universal_count, self.next_infer.index());
 
         for permission in permissions {
             debug_assert!(permission.handle.is_none());
@@ -222,12 +225,7 @@ impl<'sess> RegionRelationGraph<'sess> {
         }
     }
 
-    pub fn graphviz(
-        &self,
-        ccx: &ClauseCx<'_>,
-        universal_count: usize,
-        infer_count: usize,
-    ) -> String {
+    pub fn graphviz(&self, ccx: &ClauseCx<'_>, universal_count: usize) -> String {
         #[derive(Copy, Clone)]
         enum VizNode {
             Gc,
@@ -250,7 +248,7 @@ impl<'sess> RegionRelationGraph<'sess> {
             .map(|var| graph.add_node(VizNode::Universal(var)))
             .collect::<IndexVec<UniversalReVar, NodeIndex>>();
 
-        let infers = (0..infer_count)
+        let infers = (0..self.next_infer.index())
             .map(InferReVar::from_usize)
             .map(|var| graph.add_node(VizNode::Infer(var)))
             .collect::<IndexVec<InferReVar, NodeIndex>>();
@@ -364,10 +362,10 @@ struct ToPropagate {
 }
 
 impl PermissionElaborator {
-    fn new(tracker: &RegionRelationGraph<'_>, universal_count: usize, infer_count: usize) -> Self {
+    fn new(tracker: &RegionRelationGraph<'_>, universal_count: usize) -> Self {
         let mut graph = Graph::new();
 
-        let existentials = (0..infer_count)
+        let existentials = (0..tracker.next_infer.index())
             .map(InferReVar::from_usize)
             .map(|var| graph.add_node(ElaboratorNode::Existential(var)))
             .collect::<IndexVec<InferReVar, _>>();
@@ -522,63 +520,8 @@ impl PermissionElaborator {
         tracker: &mut RegionRelationGraph<'sess>,
         queue: &mut PromiseResolutionQueue<'sess>,
     ) {
-        self.elaborate_idealizations(tracker);
         self.elaborate_propagations(tracker, queue);
-    }
-
-    fn elaborate_idealizations(&self, tracker: &mut RegionRelationGraph<'_>) {
-        let mut queue = Vec::new();
-        let mut visit_set = FastHashSet::default();
-        let mut universal_set = FastIndexSet::default();
-
-        for &to_idealize in &self.to_idealize {
-            // Figure out everything we could imply.
-            queue.push(self.existentials[to_idealize]);
-            visit_set.insert(self.existentials[to_idealize]);
-
-            while let Some(curr) = queue.pop() {
-                for edge in self.graph.edges_directed(curr, Direction::Outgoing) {
-                    let next = edge.target();
-
-                    match self.graph[next] {
-                        ElaboratorNode::True => {
-                            // (ignored)
-                        }
-                        ElaboratorNode::Universal(var) => {
-                            universal_set.insert(var);
-                        }
-                        ElaboratorNode::Existential(_) | ElaboratorNode::And => {
-                            if visit_set.insert(next) {
-                                queue.push(next);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Create the necessary conjunction node.
-            // Recall: the order is backwards :)
-            if !universal_set.is_empty() {
-                tracker.permit(
-                    RelationMode::LhsOntoRhs,
-                    RePermissionFlags::empty(),
-                    [Re::InferVar(to_idealize)],
-                    universal_set.iter().map(|&var| Re::UniversalVar(var)),
-                );
-            } else {
-                tracker.permit(
-                    RelationMode::LhsOntoRhs,
-                    RePermissionFlags::empty(),
-                    [Re::InferVar(to_idealize)],
-                    [Re::Gc],
-                );
-            }
-
-            // Reset
-            queue.clear();
-            visit_set.clear();
-            universal_set.clear();
-        }
+        self.elaborate_idealizations(tracker);
     }
 
     fn elaborate_propagations<'sess>(
@@ -617,6 +560,95 @@ impl PermissionElaborator {
                     }
                 }
             }
+        }
+    }
+
+    fn elaborate_idealizations(&self, tracker: &mut RegionRelationGraph<'_>) {
+        let mut queue = Vec::new();
+        let mut visit_set = FastHashSet::default();
+        let mut universal_set = FastIndexSet::default();
+
+        for &to_idealize in &self.to_idealize {
+            // Figure out everything we could imply.
+            queue.push(self.existentials[to_idealize]);
+            visit_set.insert(self.existentials[to_idealize]);
+
+            while let Some(curr) = queue.pop() {
+                for edge in self.graph.edges_directed(curr, Direction::Outgoing) {
+                    let next = edge.target();
+
+                    match self.graph[next] {
+                        ElaboratorNode::True => {
+                            // (ignored)
+                        }
+                        ElaboratorNode::Universal(var) => {
+                            universal_set.insert(var);
+                        }
+                        ElaboratorNode::Existential(_) | ElaboratorNode::And => {
+                            if visit_set.insert(next) {
+                                queue.push(next);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If we're permitted to outlive a given universal (possibly transitively), remove it
+            // from the universal set.
+            visit_set.clear();
+            queue.clear();
+
+            queue.push(self.existentials[to_idealize]);
+            visit_set.insert(self.existentials[to_idealize]);
+
+            while let Some(curr) = queue.pop() {
+                for edge in self.graph.edges_directed(curr, Direction::Outgoing) {
+                    if tracker.relations[*edge.weight()].handle.is_some() {
+                        // Not a permission edge.
+                        continue;
+                    }
+
+                    let next = edge.target();
+
+                    match self.graph[next] {
+                        ElaboratorNode::Universal(var) => {
+                            universal_set.remove(&var);
+                        }
+                        ElaboratorNode::Existential(_)
+                        | ElaboratorNode::And
+                        | ElaboratorNode::True => {
+                            // (transitively passed)
+                        }
+                    }
+
+                    if visit_set.insert(next) {
+                        queue.push(next);
+                    }
+                }
+            }
+
+            // Create the necessary conjunction node.
+            // Recall: the order is backwards :)
+            if !universal_set.is_empty() {
+                tracker.permit(
+                    RelationMode::LhsOntoRhs,
+                    RePermissionFlags::empty(),
+                    [Re::InferVar(to_idealize)],
+                    universal_set.iter().map(|&var| Re::UniversalVar(var)),
+                );
+            } else {
+                tracker.permit(
+                    RelationMode::LhsOntoRhs,
+                    RePermissionFlags::empty(),
+                    [Re::InferVar(to_idealize)],
+                    [Re::Gc],
+                );
+            }
+
+            // Reset
+            queue.clear();
+            visit_set.clear();
+            universal_set.clear();
         }
     }
 }

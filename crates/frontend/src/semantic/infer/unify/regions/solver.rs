@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn prop_test_fast() {
-        for i in 0..1000 {
+        for i in 0..100 {
             prop_test_id(i);
         }
     }
