@@ -4,7 +4,7 @@ use crate::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
             ImportWfMode, InstantiatedTraitSpec, ObligationNotReady, ObligationResult,
-            ObligationTermination,
+            ObligationTermination, RePermissionFlags,
         },
         syntax::{
             AnyGeneric, DebruijnRelative, DebruijnTop, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
@@ -117,6 +117,7 @@ impl<'sess> ClauseCx<'sess> {
 
                 self.permit_general_outlives(
                     RelationMode::LhsOntoRhs,
+                    RePermissionFlags::IDEALIZE_RHS,
                     TyOrRe::Re(re_representative).intern_single(s),
                     outlives_comps,
                 );
@@ -137,7 +138,12 @@ impl<'sess> ClauseCx<'sess> {
             // Handle the simple outlives case.
             let binder = match target {
                 TraitClause::Outlives(outlive_dir, outlive) => {
-                    self.permit_outlives(outlive_dir.to_mode(), re_representative, outlive);
+                    self.permit_outlives(
+                        outlive_dir.to_mode(),
+                        RePermissionFlags::IDEALIZE_RHS,
+                        re_representative,
+                        outlive,
+                    );
                     continue;
                 }
                 TraitClause::Trait(binder) => binder,

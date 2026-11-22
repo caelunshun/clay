@@ -6,7 +6,7 @@ use crate::{
             ClauseCx, ClauseFuel, ClauseImportEnv, FnInstanceResolutionError,
             FnInstanceResolutionErrorKind, GenericSubst, HrtbUniverse, ImplBlockSatisfyError,
             ImplBlockSatisfyErrorCulprit, ImportError, ImportWfMode, InherentImplBlockSatisfyError,
-            MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
+            MultiPromiseBuilder, MultiPromiseValue, RePermissionFlags, Promise, PromiseValue,
             TraitSpecResolutionError, TraitSpecResolutionErrorCulprit,
             TypeRelativeFnDefToOwnerError,
         },
@@ -80,6 +80,7 @@ impl<'sess> ClauseCx<'sess> {
 
                         self.permit_outlives(
                             allowed_to_outlive_dir.to_mode(),
+                            RePermissionFlags::IDEALIZE_RHS,
                             target,
                             allowed_to_outlive,
                         );

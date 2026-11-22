@@ -1,7 +1,7 @@
 use crate::semantic::{
     infer::{
-        ClauseCx, Promise, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder,
-        UnifyCxMode, unify::regions::graph::RegionRelationGraph,
+        ClauseCx, RePermissionFlags, Promise, PromiseResolutionQueue, ReAndReUnifyError,
+        ReConstraintOrder, UnifyCxMode, unify::regions::graph::RegionRelationGraph,
     },
     syntax::{InferReVar, Re, RelationMode, UniversalReVar, UniversalReVarSourceInfo},
 };
@@ -71,6 +71,7 @@ impl<'sess> ReUnifyTracker<'sess> {
     pub fn permit(
         &mut self,
         mode: RelationMode,
+        flags: RePermissionFlags,
         lhs: impl IntoIterator<Item = Re>,
         rhs: impl IntoIterator<Item = Re>,
     ) {
@@ -78,7 +79,7 @@ impl<'sess> ReUnifyTracker<'sess> {
             return;
         };
 
-        relations.permit(mode, lhs, rhs);
+        relations.permit(mode, flags, lhs, rhs);
     }
 
     pub fn verify(&mut self) -> PromiseResolutionQueue<'sess> {
@@ -110,7 +111,7 @@ mod tests {
         base::Session,
         semantic::{
             analysis::TyCtxt,
-            infer::{ClauseCx, ImplCache, UnifyCxMode},
+            infer::{ClauseCx, ImplCache, RePermissionFlags, UnifyCxMode},
             syntax::{LangItems, RelationMode, UniversalReVarSourceInfo},
         },
     };
@@ -141,14 +142,24 @@ mod tests {
             .report_never();
 
         // permit(re_1: &shorter re_b)
-        ccx.permit_re_and_re(RelationMode::LhsOntoRhs, [re_b], [re_1]);
+        ccx.permit_re_and_re(
+            RelationMode::LhsOntoRhs,
+            RePermissionFlags::TRANSITIVE,
+            [re_b],
+            [re_1],
+        );
 
         // constrain(re_b: &shorter re_2)
         ccx.unify_re_and_re(RelationMode::RhsOntoLhs, [re_b], [re_2])
             .report_never();
 
         // permit(re_2: &shorter re_c)
-        ccx.permit_re_and_re(RelationMode::LhsOntoRhs, [re_c], [re_2]);
+        ccx.permit_re_and_re(
+            RelationMode::LhsOntoRhs,
+            RePermissionFlags::TRANSITIVE,
+            [re_c],
+            [re_2],
+        );
 
         // constrain(re_a: &shorter re_c)
         // Should be derived from...
@@ -188,14 +199,24 @@ mod tests {
             .report_never();
 
         // permit(re_1: &longer re_b)
-        ccx.permit_re_and_re(RelationMode::RhsOntoLhs, [re_b], [re_1]);
+        ccx.permit_re_and_re(
+            RelationMode::RhsOntoLhs,
+            RePermissionFlags::TRANSITIVE,
+            [re_b],
+            [re_1],
+        );
 
         // constrain(re_b: &longer re_2)
         ccx.unify_re_and_re(RelationMode::LhsOntoRhs, [re_b], [re_2])
             .report_never();
 
         // permit(re_2: &longer re_c)
-        ccx.permit_re_and_re(RelationMode::RhsOntoLhs, [re_c], [re_2]);
+        ccx.permit_re_and_re(
+            RelationMode::RhsOntoLhs,
+            RePermissionFlags::TRANSITIVE,
+            [re_c],
+            [re_2],
+        );
 
         // constrain(re_a: &longer re_c)
         // Should be derived from...

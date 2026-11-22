@@ -18,7 +18,7 @@ use crate::{
         },
         infer::{
             ClauseCx, ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, MirSpannedError,
-            ToDebugTree as _, UnifyCxMode,
+            RePermissionFlags, ToDebugTree as _, UnifyCxMode,
         },
         syntax::{
             AdtInstance, FnDef, MirBlockIdx, MirBody, MirBodyDirection, MirLocalIdx,
@@ -225,6 +225,7 @@ impl TyCtxt<'_> {
             // All locals live shorter than our signature universals
             ccx.permit_re_and_re(
                 RelationMode::LhsOntoRhs,
+                RePermissionFlags::TRANSITIVE,
                 [shortest_sig_universal],
                 [atomic_place_universals[rhs]],
             );
@@ -329,6 +330,7 @@ impl TyCtxt<'_> {
             for lhs in outlive_mask.iter() {
                 ccx.permit_re_and_re(
                     RelationMode::LhsOntoRhs,
+                    RePermissionFlags::TRANSITIVE,
                     [atomic_place_universals[lhs]],
                     [atomic_place_universals[rhs]],
                 );
@@ -357,7 +359,8 @@ impl TyCtxt<'_> {
                         *local_ty,
                         atomic_place_universals[atomic],
                     )
-                    .report_never();
+                    .map(move |_ccx, error| MirSpannedError(MirSourceInfo::Local(local_idx), error))
+                    .report_loud();
             }
         }
 

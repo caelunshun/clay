@@ -5,8 +5,8 @@ use crate::{
     semantic::{
         infer::{
             ClauseCx, ClauseObligation, GeneralOutlivesError, GeneralOutlivesErrorKind,
-            ObligationNotReady, ObligationResult, ObligationTermination, Promise, PromiseHandle,
-            ReConstraintOrder,
+            ObligationNotReady, ObligationResult, ObligationTermination, RePermissionFlags, Promise,
+            PromiseHandle, ReConstraintOrder,
         },
         syntax::{InferTyVar, Re, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe, TyOrReList},
     },
@@ -16,6 +16,7 @@ impl<'sess> ClauseCx<'sess> {
     pub fn permit_outlives(
         &mut self,
         mode: RelationMode,
+        flags: RePermissionFlags,
         lhs: impl Into<TyOrRe>,
         rhs: impl Into<TyOrRe>,
     ) {
@@ -25,11 +26,11 @@ impl<'sess> ClauseCx<'sess> {
         let rhs = rhs.into();
 
         if let (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) = (lhs, rhs) {
-            self.permit_re_and_re(mode, [lhs], [rhs]);
+            self.permit_re_and_re(mode, flags, [lhs], [rhs]);
             return;
         }
 
-        self.permit_general_outlives(mode, lhs.intern_single(s), rhs.intern_single(s));
+        self.permit_general_outlives(mode, flags, lhs.intern_single(s), rhs.intern_single(s));
     }
 
     pub fn oblige_outlives(
@@ -64,6 +65,7 @@ impl<'sess> ClauseCx<'sess> {
     pub fn permit_general_outlives(
         &mut self,
         mode: RelationMode,
+        flags: RePermissionFlags,
         lhs: TyOrReList,
         rhs: TyOrReList,
     ) {
@@ -72,6 +74,7 @@ impl<'sess> ClauseCx<'sess> {
         self.push_obligation(ClauseObligation::Outlives {
             handle: None,
             mode,
+            flags_if_applicable: flags,
             order,
             lhs,
             rhs,
@@ -91,6 +94,7 @@ impl<'sess> ClauseCx<'sess> {
             handle: Some(handle),
             order,
             mode,
+            flags_if_applicable: RePermissionFlags::empty(),
             lhs,
             rhs,
         });
@@ -103,6 +107,7 @@ impl<'sess> ClauseCx<'sess> {
         handle: Option<PromiseHandle<'sess, GeneralOutlivesError>>,
         order: ReConstraintOrder,
         mode: RelationMode,
+        flags_if_applicable: RePermissionFlags,
         lhs: TyOrReList,
         rhs: TyOrReList,
     ) -> ObligationResult {
@@ -125,7 +130,7 @@ impl<'sess> ClauseCx<'sess> {
                 })
                 .forward(self, handle);
         } else {
-            self.permit_re_and_re(mode, lhs_regions, rhs_regions);
+            self.permit_re_and_re(mode, flags_if_applicable, lhs_regions, rhs_regions);
         }
 
         Ok(ObligationTermination::Finished)

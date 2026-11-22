@@ -448,14 +448,16 @@
 //! This operation is done in the [`graph`] portion of the solver since it doesn't affect the
 //! underlying theory of the solver.
 //!
+//! TODO: can we come up with an underlying theory that doesn't require this step?
+//!
 //! ## Organization
 //!
 //! - The [`solver`] module provides an interactive structure for verifying formulae using the
 //!   theory defined above. One can either push a formula as an axiom using `push_axiom` or
 //!   push a formula while checking its validity against the preconditions using `push_checked`.
 //!
-//! - The [`graph`] module builds on the `solver` to add support for permission and constraint
-//!   edges such that permissions properly propagate across reachable subgraphs of inference nodes.
+//! - The [`graph`] module builds on the `solver` to add support for permission edges which require
+//!   knowledge of the full region constraint graph to elaborate.
 //!
 //! - We package this all up in the [`driver`] module for `UnifyCx`'s consumption.
 //!

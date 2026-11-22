@@ -1,16 +1,15 @@
 use crate::{
-    bool_enum,
     semantic::{
         infer::{
             ClauseCx, ClausePrettyFmtOpts, Promise, PromiseHandle, PromiseResolutionQueue,
-            ReAndReUnifyError, ReConstraintOrder,
+            ReAndReUnifyError, ReConstraintOrder, RePermissionFlags,
             unify::regions::solver::{RegionFormulaSolver, RegionFormulaTerm},
         },
         syntax::{InferReVar, Re, RelationMode, UniversalReVar},
     },
     utils::lang::RangeExt as _,
 };
-use clay_core::FastHashSet;
+use clay_core::{FastHashSet, FastIndexSet};
 use index_vec::{IndexVec, define_index_type};
 use petgraph::{Direction, Graph, dot::Dot, graph::NodeIndex, visit::EdgeRef};
 use std::{
@@ -40,6 +39,11 @@ pub struct RegionRelationGraph<'sess> {
 struct Relation<'sess> {
     /// A handle if this is a constraint or `None` if this is the assertion portion of a permission.
     handle: Option<PromiseHandle<'sess, ReAndReUnifyError>>,
+
+    /// The flags used to create this permission, if applicable.
+    flags: RePermissionFlags,
+
+    /// The order in which this relation should be added to the solver.
     order: RelationOrder,
 
     mode: RelationMode,
@@ -76,6 +80,7 @@ impl<'sess> RegionRelationGraph<'sess> {
     pub fn permit(
         &mut self,
         mode: RelationMode,
+        flags: RePermissionFlags,
         lhs: impl IntoIterator<Item = Re>,
         rhs: impl IntoIterator<Item = Re>,
     ) {
@@ -87,6 +92,7 @@ impl<'sess> RegionRelationGraph<'sess> {
         self.relations.push(Relation {
             handle: None,
             order: RelationOrder::Permission,
+            flags,
             mode,
             lhs,
             rhs,
@@ -112,6 +118,7 @@ impl<'sess> RegionRelationGraph<'sess> {
         self.relations.push(Relation {
             handle: Some(handle),
             order: RelationOrder::Constraint(order),
+            flags: RePermissionFlags::empty(),
             mode,
             lhs,
             rhs,
@@ -154,12 +161,8 @@ impl<'sess> RegionRelationGraph<'sess> {
         universal_count: usize,
         infer_count: usize,
     ) {
-        // For permissions involving inference variables, we promote all relations that transitively
-        // connect that inference variable to further terms into axioms, stopping until we reach a
-        // universal variable or a `'gc`. If a relation has mixed axiomatic-ness—that is, parts of
-        // it are axioms and parts aren't, as could happen with a conjunction term—we promote the
-        // whole term.
-        PermissionElaborator::new(self, universal_count, infer_count).propagate(self, queue);
+        // Elaborate permissions according to their `RePermissionFlags`.
+        PermissionElaborator::new(self, universal_count, infer_count).elaborate(self);
 
         self.relations
             .sort_by_key(|relation| relation.order.to_num());
@@ -337,21 +340,27 @@ impl<'sess> RegionRelationGraph<'sess> {
 // === PermissionElaborator === //
 
 struct PermissionElaborator {
-    graph: Graph<NodeShouldPropagate, RelationIdx>,
+    graph: Graph<ElaboratorNode, ()>,
     universals: IndexVec<UniversalReVar, NodeIndex>,
     existentials: IndexVec<InferReVar, NodeIndex>,
     truthy: NodeIndex,
+    to_idealize: Vec<InferReVar>,
+    to_propagate: Vec<ToPropagate>,
 }
 
-bool_enum! {
-    enum NodeShouldPropagate {
-        true => Yes;
-        false => No;
-    }
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum ElaboratorNode {
+    True,
+    And,
+    Universal(UniversalReVar),
+    Existential(InferReVar),
 }
 
-const DUMMY_EDGE: RelationIdx = RelationIdx::from_raw_unchecked(u32::MAX - 1);
-const PERMISSION_EDGE: RelationIdx = RelationIdx::from_raw_unchecked(u32::MAX);
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+struct ToPropagate {
+    target: NodeIndex,
+    direction: Direction,
+}
 
 impl PermissionElaborator {
     fn new(tracker: &RegionRelationGraph<'_>, universal_count: usize, infer_count: usize) -> Self {
@@ -359,86 +368,104 @@ impl PermissionElaborator {
 
         let existentials = (0..infer_count)
             .map(InferReVar::from_usize)
-            .map(|_| graph.add_node(NodeShouldPropagate::Yes))
+            .map(|var| graph.add_node(ElaboratorNode::Existential(var)))
             .collect::<IndexVec<InferReVar, _>>();
 
         let universals = (0..universal_count)
             .map(UniversalReVar::from_usize)
-            .map(|_| graph.add_node(NodeShouldPropagate::No))
+            .map(|var| graph.add_node(ElaboratorNode::Universal(var)))
             .collect::<IndexVec<UniversalReVar, _>>();
 
-        let truthy = graph.add_node(NodeShouldPropagate::No);
+        let truthy = graph.add_node(ElaboratorNode::True);
 
         let mut this = Self {
             graph,
             universals,
             existentials,
             truthy,
+            to_idealize: Vec::new(),
+            to_propagate: Vec::new(),
         };
 
-        for (
-            relation_idx,
-            &Relation {
-                ref handle,
-                mode,
-                lhs,
-                rhs,
-                ..
-            },
-        ) in tracker.relations.iter_enumerated()
+        for &Relation {
+            ref handle,
+            mode,
+            flags: permissions,
+            lhs,
+            rhs,
+            ..
+        } in &tracker.relations
         {
-            let weight = if handle.is_some() {
-                relation_idx
-            } else {
-                PERMISSION_EDGE
-            };
-
-            for (lhs, rhs) in mode.enumerate(lhs, rhs) {
-                this.build_relation(tracker, weight, lhs, rhs);
+            // To make everything confusing forever, we use the implication order of regions. Yes,
+            // having two conventions for LHS and RHS is super annoying.
+            for (lhs, rhs) in mode.enumerate(rhs, lhs) {
+                this.build_implication_edge(
+                    tracker,
+                    handle.is_none().then_some(permissions),
+                    lhs,
+                    rhs,
+                );
             }
         }
 
         this
     }
 
-    fn build_relation(
+    fn build_implication_edge(
         &mut self,
         tracker: &RegionRelationGraph<'_>,
-        weight: RelationIdx,
+        permissions: Option<RePermissionFlags>,
         lhs: Range<BufferIdx>,
         rhs: Range<BufferIdx>,
     ) {
         let lhs = tracker.buffer[lhs.to_ops_range()].as_raw_slice();
         let rhs = tracker.buffer[rhs.to_ops_range()].as_raw_slice();
 
-        match (lhs, rhs) {
-            ([], _) | (_, []) => return,
-            (&[lhs], rhs) => {
+        if let Some(permissions) = permissions {
+            for &lhs in lhs {
+                match lhs {
+                    RegionFormulaTerm::Existential(var) => {
+                        // Yes, this is another instance of a backwards implication. Deal with it.
+                        if permissions.contains(RePermissionFlags::IDEALIZE_RHS) {
+                            self.to_idealize.push(var);
+                        }
+                    }
+                    RegionFormulaTerm::True | RegionFormulaTerm::Universal(_) => {
+                        // (no need to complete)
+                    }
+                }
+            }
+        }
+
+        match lhs {
+            [] => {
+                // (vacuous)
+            }
+            &[lhs] => {
+                let lhs = self.term_to_node(lhs);
+
                 for &rhs in rhs {
-                    self.graph
-                        .add_edge(self.term_to_node(lhs), self.term_to_node(rhs), weight);
+                    let rhs = self.term_to_node(rhs);
+
+                    self.graph.add_edge(lhs, rhs, ());
                 }
             }
-            (lhs, &[rhs]) => {
-                for &lhs in lhs {
-                    self.graph
-                        .add_edge(self.term_to_node(lhs), self.term_to_node(rhs), weight);
-                }
-            }
-            // `joiner` avoids `O(n^2)` edge count.
-            (lhs, rhs) => {
-                let joiner = self.graph.add_node(NodeShouldPropagate::Yes);
+            lhs => {
+                let and = self.graph.add_node(ElaboratorNode::And);
 
                 for &lhs in lhs {
-                    self.graph
-                        .add_edge(self.term_to_node(lhs), joiner, DUMMY_EDGE);
+                    let lhs = self.term_to_node(lhs);
+
+                    self.graph.add_edge(lhs, and, ());
                 }
 
                 for &rhs in rhs {
-                    self.graph.add_edge(joiner, self.term_to_node(rhs), weight);
+                    let rhs = self.term_to_node(rhs);
+
+                    self.graph.add_edge(and, rhs, ());
                 }
             }
-        };
+        }
     }
 
     fn term_to_node(&self, term: RegionFormulaTerm) -> NodeIndex {
@@ -449,82 +476,67 @@ impl PermissionElaborator {
         }
     }
 
-    fn propagate<'sess>(
-        &self,
-        tracker: &mut RegionRelationGraph<'sess>,
-        queue: &mut PromiseResolutionQueue<'sess>,
-    ) {
-        let mut forward = DirectionalPermissionElaborator::new(self, Direction::Outgoing);
-        let mut backward = DirectionalPermissionElaborator::new(self, Direction::Incoming);
-
-        for edge in self.graph.edge_references() {
-            if *edge.weight() != PERMISSION_EDGE {
-                continue;
-            }
-
-            if self.graph[edge.target()].is_truthy() {
-                forward.queue(edge.target());
-                forward.flush(tracker, queue);
-            }
-
-            if self.graph[edge.source()].is_truthy() {
-                backward.queue(edge.source());
-                backward.flush(tracker, queue);
-            }
-        }
-    }
-}
-
-struct DirectionalPermissionElaborator<'a> {
-    graph: &'a PermissionElaborator,
-    direction: Direction,
-    visit_stack: Vec<NodeIndex>,
-    visit_set: FastHashSet<NodeIndex>,
-}
-
-impl<'a> DirectionalPermissionElaborator<'a> {
-    fn new(graph: &'a PermissionElaborator, direction: Direction) -> Self {
-        Self {
-            graph,
-            direction,
-            visit_stack: Vec::new(),
-            visit_set: FastHashSet::default(),
-        }
+    fn elaborate(&self, tracker: &mut RegionRelationGraph<'_>) {
+        self.elaborate_propagations(tracker);
+        self.elaborate_idealizations(tracker);
     }
 
-    fn queue(&mut self, node: NodeIndex) {
-        if self.visit_set.insert(node) {
-            self.visit_stack.push(node);
-        }
+    fn elaborate_propagations(&self, tracker: &mut RegionRelationGraph<'_>) {
+        todo!()
     }
 
-    fn flush<'sess>(
-        &mut self,
-        tracker: &mut RegionRelationGraph<'sess>,
-        queue: &mut PromiseResolutionQueue<'sess>,
-    ) {
-        while let Some(node) = self.visit_stack.pop() {
-            for edge in self.graph.graph.edges_directed(node, self.direction) {
-                let relation = *edge.weight();
+    fn elaborate_idealizations(&self, tracker: &mut RegionRelationGraph<'_>) {
+        let mut queue = Vec::new();
+        let mut visit_set = FastHashSet::default();
+        let mut universal_set = FastIndexSet::default();
 
-                if relation.index() < RelationIdx::MAX_INDEX
-                    && let relation = &mut tracker.relations[relation]
-                    && let Some(handle) = relation.handle.take()
-                {
-                    relation.order = RelationOrder::Permission;
-                    tracker.permission_count += 1;
-                    handle.queue_accept(queue);
-                }
+        for &to_idealize in &self.to_idealize {
+            // Figure out everything we could imply.
+            queue.push(self.existentials[to_idealize]);
+            visit_set.insert(self.existentials[to_idealize]);
 
-                let other = match self.direction {
-                    Direction::Outgoing => edge.target(),
-                    Direction::Incoming => edge.source(),
-                };
+            while let Some(curr) = queue.pop() {
+                for edge in self.graph.edges_directed(curr, Direction::Outgoing) {
+                    let next = edge.target();
 
-                if self.graph.graph[other].is_truthy() {
-                    self.queue(other);
+                    match self.graph[next] {
+                        ElaboratorNode::True => {
+                            // (ignored)
+                        }
+                        ElaboratorNode::Universal(var) => {
+                            universal_set.insert(var);
+                        }
+                        ElaboratorNode::Existential(_) | ElaboratorNode::And => {
+                            if visit_set.insert(next) {
+                                queue.push(next);
+                            }
+                        }
+                    }
                 }
             }
+
+            // Create the necessary conjunction node.
+            // Recall: the order is backwards :)
+            if !universal_set.is_empty() {
+                tracker.permit(
+                    RelationMode::LhsOntoRhs,
+                    RePermissionFlags::empty(),
+                    [Re::InferVar(to_idealize)],
+                    universal_set.iter().map(|&var| Re::UniversalVar(var)),
+                );
+            } else {
+                tracker.permit(
+                    RelationMode::LhsOntoRhs,
+                    RePermissionFlags::empty(),
+                    [Re::InferVar(to_idealize)],
+                    [Re::Gc],
+                );
+            }
+
+            // Reset
+            queue.clear();
+            visit_set.clear();
+            universal_set.clear();
         }
     }
 }

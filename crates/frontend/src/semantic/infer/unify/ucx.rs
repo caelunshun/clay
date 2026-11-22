@@ -31,6 +31,27 @@ pub enum UnifyCxMode {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ReConstraintOrder(pub NonZeroU32);
 
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+    pub struct RePermissionFlags: u8 {
+        const TRANSITIVE = Self::TRANSITIVE_LHS.bits() | Self::TRANSITIVE_RHS.bits();
+
+        /// If the LHS is an inference node, all transitive constraints up until a universal or
+        /// `'gc` lifetime will be promoted to permissions.
+        const TRANSITIVE_LHS = 1 << 0;
+
+        /// If the RHS is an inference node, all transitive constraints up until a universal or
+        /// `'gc` lifetime will be promoted to permissions.
+        const TRANSITIVE_RHS = 1 << 1;
+
+        /// Makes the inference variable grant maximally powerful permissions without breaking other
+        /// constraints.
+        ///
+        /// See "Inference Permission Completion" in the `regions` module for details.
+        const IDEALIZE_RHS = 1 << 1;
+    }
+}
+
 /// A type inference context for solving type obligations of the form...
 ///
 /// - `Region: Region`
@@ -159,10 +180,11 @@ impl<'sess> UnifyCx<'sess> {
     pub fn permit_re_and_re(
         &mut self,
         mode: RelationMode,
+        flags: RePermissionFlags,
         lhs: impl IntoIterator<Item = Re>,
         rhs: impl IntoIterator<Item = Re>,
     ) {
-        self.regions.permit(mode, lhs, rhs);
+        self.regions.permit(mode, flags, lhs, rhs);
     }
 
     pub fn unify_re_and_re(

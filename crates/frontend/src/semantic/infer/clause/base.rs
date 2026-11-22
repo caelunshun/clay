@@ -8,7 +8,7 @@ use crate::{
             HrtbUniverse, ImplCache, InstantiatedTraitImplError, InstantiatedTraitImplErrorKind,
             MultiPromise, MultiPromiseBuilder, NotCoveredError, ObligationNotReady,
             ObligationTermination, Promise, PromiseHandle, PromiseMode, PromiseResolutionQueue,
-            ReAndReUnifyError, ReConstraintOrder, TyAndSimpleTySetUnifyError,
+            ReAndReUnifyError, ReConstraintOrder, RePermissionFlags, TyAndSimpleTySetUnifyError,
             TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError, TyAndTyUnifyError,
             TyAndTyUnifyErrorKind, UnifyCx, UnifyCxMode, UniversalElaboration,
         },
@@ -44,6 +44,7 @@ pub enum ClauseObligation<'sess> {
         handle: Option<PromiseHandle<'sess, GeneralOutlivesError>>,
         order: ReConstraintOrder,
         mode: RelationMode,
+        flags_if_applicable: RePermissionFlags,
         lhs: TyOrReList,
         rhs: TyOrReList,
     },
@@ -267,9 +268,17 @@ impl<'sess> ClauseCx<'sess> {
                         handle,
                         order,
                         mode,
+                        flags_if_applicable,
                         lhs,
                         rhs,
-                    } => fork.run_oblige_ty_outlives_re(handle, order, mode, lhs, rhs),
+                    } => fork.run_oblige_ty_outlives_re(
+                        handle,
+                        order,
+                        mode,
+                        flags_if_applicable,
+                        lhs,
+                        rhs,
+                    ),
                     ClauseObligation::Covered {
                         handle,
                         must_mention,
@@ -397,6 +406,7 @@ impl<'sess> ClauseCx<'sess> {
                     handle,
                     order: _,
                     mode,
+                    flags_if_applicable: _,
                     lhs,
                     rhs,
                 } => {
@@ -542,10 +552,11 @@ impl<'sess> ClauseCx<'sess> {
     pub fn permit_re_and_re(
         &mut self,
         mode: RelationMode,
+        flags: RePermissionFlags,
         lhs: impl IntoIterator<Item = Re>,
         rhs: impl IntoIterator<Item = Re>,
     ) {
-        self.ucx_mut().permit_re_and_re(mode, lhs, rhs);
+        self.ucx_mut().permit_re_and_re(mode, flags, lhs, rhs);
     }
 
     pub fn init_re_universal_var_direct_clauses(&mut self, var: Re, clauses: TraitClauseList) {
@@ -556,7 +567,12 @@ impl<'sess> ClauseCx<'sess> {
                 unreachable!();
             };
 
-            self.permit_outlives(permitted_outlive_dir.to_mode(), var, permitted_outlive);
+            self.permit_outlives(
+                permitted_outlive_dir.to_mode(),
+                RePermissionFlags::IDEALIZE_RHS,
+                var,
+                permitted_outlive,
+            );
         }
     }
 
