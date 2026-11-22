@@ -1,0 +1,19 @@
+error: 
+- span: occurs_univ_proj.clay:16:19-34
+  cannot unify
+  LHS: u(1) <u(0) T as Projector<?(6) _>>::Assoc
+  RHS: ?(6) _
+  mode: Equate
+    - structural error
+        - infer ty reoccurs
+          var: ?(6) _
+          occurs in: u(1) <u(0) T as Projector<?(6) _>>::Assoc
+
+error: type hints required for this type
+   ┌─ occurs_univ_proj.clay:14:9
+   │
+14 │     let foo = CycleBuilder::<_>;
+   │         ^^^
+
+error: oh no! _4 = call(move(_5), [move(_2), move(_6)]) goto bb10v1 unwind bb9v1; // Todo
+

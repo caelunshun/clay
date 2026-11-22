@@ -1121,7 +1121,7 @@ impl<'sess> TyFolder<'sess> for InferTySubstitutor<'_, 'sess> {
         projection: UniversalTyProj,
     ) -> Result<UniversalTyProj, Self::Error> {
         // Preserves identity :)
-        self.fold_fallible(projection)
+        self.super_fallible(projection)
     }
 }
 
