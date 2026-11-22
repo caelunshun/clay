@@ -162,7 +162,7 @@ impl<'sess> RegionRelationGraph<'sess> {
         infer_count: usize,
     ) {
         // Elaborate permissions according to their `RePermissionFlags`.
-        PermissionElaborator::new(self, universal_count, infer_count).elaborate(self);
+        PermissionElaborator::new(self, universal_count, infer_count).elaborate(self, queue);
 
         self.relations
             .sort_by_key(|relation| relation.order.to_num());
@@ -340,12 +340,13 @@ impl<'sess> RegionRelationGraph<'sess> {
 // === PermissionElaborator === //
 
 struct PermissionElaborator {
-    graph: Graph<ElaboratorNode, ()>,
+    graph: Graph<ElaboratorNode, RelationIdx>,
     universals: IndexVec<UniversalReVar, NodeIndex>,
     existentials: IndexVec<InferReVar, NodeIndex>,
     truthy: NodeIndex,
-    to_idealize: Vec<InferReVar>,
-    to_propagate: Vec<ToPropagate>,
+    to_idealize: FastIndexSet<InferReVar>,
+    to_propagate_queue: Vec<ToPropagate>,
+    to_propagate_set: FastHashSet<ToPropagate>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -383,18 +384,22 @@ impl PermissionElaborator {
             universals,
             existentials,
             truthy,
-            to_idealize: Vec::new(),
-            to_propagate: Vec::new(),
+            to_idealize: FastIndexSet::default(),
+            to_propagate_queue: Vec::new(),
+            to_propagate_set: FastHashSet::default(),
         };
 
-        for &Relation {
-            ref handle,
-            mode,
-            flags: permissions,
-            lhs,
-            rhs,
-            ..
-        } in &tracker.relations
+        for (
+            relation_idx,
+            &Relation {
+                ref handle,
+                mode,
+                flags: permissions,
+                lhs,
+                rhs,
+                ..
+            },
+        ) in tracker.relations.iter_enumerated()
         {
             // To make everything confusing forever, we use the implication order of regions. Yes,
             // having two conventions for LHS and RHS is super annoying.
@@ -402,6 +407,7 @@ impl PermissionElaborator {
                 this.build_implication_edge(
                     tracker,
                     handle.is_none().then_some(permissions),
+                    relation_idx,
                     lhs,
                     rhs,
                 );
@@ -415,28 +421,14 @@ impl PermissionElaborator {
         &mut self,
         tracker: &RegionRelationGraph<'_>,
         permissions: Option<RePermissionFlags>,
+        relation_idx: RelationIdx,
         lhs: Range<BufferIdx>,
         rhs: Range<BufferIdx>,
     ) {
         let lhs = tracker.buffer[lhs.to_ops_range()].as_raw_slice();
         let rhs = tracker.buffer[rhs.to_ops_range()].as_raw_slice();
 
-        if let Some(permissions) = permissions {
-            for &lhs in lhs {
-                match lhs {
-                    RegionFormulaTerm::Existential(var) => {
-                        // Yes, this is another instance of a backwards implication. Deal with it.
-                        if permissions.contains(RePermissionFlags::IDEALIZE_RHS) {
-                            self.to_idealize.push(var);
-                        }
-                    }
-                    RegionFormulaTerm::True | RegionFormulaTerm::Universal(_) => {
-                        // (no need to complete)
-                    }
-                }
-            }
-        }
-
+        // Build graph
         match lhs {
             [] => {
                 // (vacuous)
@@ -447,7 +439,7 @@ impl PermissionElaborator {
                 for &rhs in rhs {
                     let rhs = self.term_to_node(rhs);
 
-                    self.graph.add_edge(lhs, rhs, ());
+                    self.graph.add_edge(lhs, rhs, relation_idx);
                 }
             }
             lhs => {
@@ -456,13 +448,62 @@ impl PermissionElaborator {
                 for &lhs in lhs {
                     let lhs = self.term_to_node(lhs);
 
-                    self.graph.add_edge(lhs, and, ());
+                    self.graph.add_edge(lhs, and, relation_idx);
                 }
 
                 for &rhs in rhs {
                     let rhs = self.term_to_node(rhs);
 
-                    self.graph.add_edge(and, rhs, ());
+                    self.graph.add_edge(and, rhs, relation_idx);
+                }
+            }
+        }
+
+        // Register permission elaboration actions
+        if let Some(permissions) = permissions {
+            for &lhs in lhs {
+                match lhs {
+                    RegionFormulaTerm::Existential(var) => {
+                        // Yes, this is another instance of a backwards implication. Deal with it.
+                        if permissions.contains(RePermissionFlags::IDEALIZE_RHS) {
+                            self.to_idealize.insert(var);
+                        }
+
+                        if permissions.contains(RePermissionFlags::TRANSITIVE_RHS) {
+                            let action = ToPropagate {
+                                target: self.term_to_node(lhs),
+                                direction: Direction::Incoming,
+                            };
+
+                            if self.to_propagate_set.insert(action) {
+                                self.to_propagate_queue.push(action);
+                            }
+                        }
+                    }
+                    RegionFormulaTerm::True | RegionFormulaTerm::Universal(_) => {
+                        // (no need to complete)
+                    }
+                }
+            }
+
+            for &rhs in rhs {
+                match rhs {
+                    RegionFormulaTerm::Existential(_) => {
+                        // Again, implication terminology and unification terminology are backwards.
+                        if permissions.contains(RePermissionFlags::TRANSITIVE_LHS) {
+                            let action = ToPropagate {
+                                target: self.term_to_node(rhs),
+                                direction: Direction::Outgoing,
+                            };
+
+                            if self.to_propagate_set.insert(action) {
+                                self.to_propagate_queue.push(action);
+                            }
+                        }
+                    }
+                    RegionFormulaTerm::True | RegionFormulaTerm::Universal(_) => {
+                        // (no need to complete)
+                    }
                 }
             }
         }
@@ -476,13 +517,13 @@ impl PermissionElaborator {
         }
     }
 
-    fn elaborate(&self, tracker: &mut RegionRelationGraph<'_>) {
-        self.elaborate_propagations(tracker);
+    fn elaborate<'sess>(
+        &mut self,
+        tracker: &mut RegionRelationGraph<'sess>,
+        queue: &mut PromiseResolutionQueue<'sess>,
+    ) {
         self.elaborate_idealizations(tracker);
-    }
-
-    fn elaborate_propagations(&self, tracker: &mut RegionRelationGraph<'_>) {
-        todo!()
+        self.elaborate_propagations(tracker, queue);
     }
 
     fn elaborate_idealizations(&self, tracker: &mut RegionRelationGraph<'_>) {
@@ -537,6 +578,45 @@ impl PermissionElaborator {
             queue.clear();
             visit_set.clear();
             universal_set.clear();
+        }
+    }
+
+    fn elaborate_propagations<'sess>(
+        &mut self,
+        tracker: &mut RegionRelationGraph<'sess>,
+        queue: &mut PromiseResolutionQueue<'sess>,
+    ) {
+        while let Some(ToPropagate { target, direction }) = self.to_propagate_queue.pop() {
+            for edge in self.graph.edges_directed(target, direction) {
+                let next = match direction {
+                    Direction::Outgoing => edge.target(),
+                    Direction::Incoming => edge.source(),
+                };
+
+                let relation = &mut tracker.relations[*edge.weight()];
+
+                if let Some(handle) = relation.handle.take() {
+                    handle.queue_accept(queue);
+                    relation.order = RelationOrder::Permission;
+                    tracker.permission_count += 1;
+                }
+
+                match self.graph[next] {
+                    ElaboratorNode::True | ElaboratorNode::Universal(_) => {
+                        // (stop propagating)
+                    }
+                    ElaboratorNode::And | ElaboratorNode::Existential(_) => {
+                        let action = ToPropagate {
+                            target: next,
+                            direction,
+                        };
+
+                        if self.to_propagate_set.insert(action) {
+                            self.to_propagate_queue.push(action);
+                        }
+                    }
+                }
+            }
         }
     }
 }

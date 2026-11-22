@@ -1,0 +1,13 @@
+error: 
+- source info: Local(1)
+  general outlives error
+  LHS: u(5) <u(0) T as BarParameterized<'?6>>::Out
+  RHS: 'u1
+  Error:
+    - re and re unify error
+      LHS: 'universal(u(5) <u(0) T as BarParameterized<'?6>>::Out)
+      RHS: 'u1
+      mode: LhsOntoRhs
+        - requires var: 'universal(u(5) <u(0) T as BarParameterized<'?6>>::Out)
+          to outlive: 'u1
+
